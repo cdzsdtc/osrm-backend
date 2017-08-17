@@ -66,6 +66,10 @@ class IntersectionHandler
     template <typename IntersectionType> // works with Intersection and IntersectionView
     std::size_t findObviousTurn(const EdgeID via_edge, const IntersectionType &intersection) const;
 
+    template <typename IntersectionType> // works with Intersection and IntersectionView
+    std::size_t findObviousTurnOld(const EdgeID via_edge,
+                                   const IntersectionType &intersection) const;
+
     // Obvious turns can still take multiple forms. This function looks at the turn onto a road
     // candidate when coming from a via_edge and determines the best instruction to emit.
     // `through_street` indicates if the street turned onto is a through sreet (think mergees and
@@ -117,11 +121,155 @@ class IntersectionHandler
     bool isSameName(const EdgeID source_edge_id, const EdgeID target_edge_id) const;
 };
 
-// Impl.
+namespace
+{
 
+template <typename IntersectionType> // works with Intersection and IntersectionView
+inline bool isDistinctTurn(const std::size_t index,
+                           const IntersectionType &intersection,
+                           const EdgeID via_edge,
+                           const util::NodeBasedDynamicGraph &node_based_graph)
+{
+    // for comparing road categories
+    const auto &via_edge_data = node_based_graph.GetEdgeData(via_edge);
+    const auto &candidate_data = node_based_graph.GetEdgeData(intersection[index].eid);
+
+    // check if a road is distinct to the obvious turn candidate in its road class. This is the case
+    // only if we pass by a lower road category class or a link to the same category
+    auto const distinct_by_class = [&](auto const &road) {
+        auto const &compare_data = node_based_graph.GetEdgeData(road.eid);
+
+        // passing a road of a stricly lower category (e.g. residential driving past driveway,
+        // primary road passing a residential road) but also exiting a freeway onto a primary in the
+        // presence of an alley
+        if (strictlyLess(compare_data.road_classification, via_edge_data.road_classification) &&
+            strictlyLess(compare_data.road_classification, candidate_data.road_classification))
+            return true;
+
+        // passing by a link of the same category
+        if (isLinkTo(compare_data.road_classification, via_edge_data.road_classification) &&
+            isLinkTo(compare_data.road_classification, candidate_data.road_classification))
+            return true;
+
+        return false;
+    };
+
+    // in case of narrow turns, we apply different criteria than for actual turns. In case of a
+    // narrow turn, having two choices one of which is forbidden is fine. In case of a end of the
+    // road turn, having two directions and not being allowed to turn onto one of them isn't always
+    // as clear
+    auto const candidate_deviation = util::angularDeviation(intersection[index].angle, STRAIGHT_ANGLE);
+    if (candidate_deviation <= NARROW_TURN_ANGLE)
+    {
+        // if the road is not taking a turn at all, we consider it distinct, even though other close
+        // turns might exist
+        if (candidate_deviation <= MAXIMAL_ALLOWED_NO_TURN_DEVIATION)
+            return true;
+
+        // check if there are other narrow turns are not considered passing a low category or simply
+        // a link of the same type as the potentially obvious turn
+        auto const is_similar_turn = [&](auto const &road) {
+            // skip over our candidate
+            if (road.eid == intersection[index].eid)
+                return false;
+
+            // since we have a narrow turn, we only care for roads allowing entry
+            if (!road.entry_allowed)
+                return false;
+
+            auto const compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
+            // at least a relative and a maximum difference
+            if (compare_deviation / candidate_deviation > DISTINCTION_RATIO &&
+                std::abs(compare_deviation - candidate_deviation) > FUZZY_ANGLE_DIFFERENCE)
+                return false;
+
+            // since the angle and allowed match, we compare road categories. Passing a low priority
+            // road allows us to consider it non obvious
+            return !distinct_by_class(road);
+        };
+
+        return std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn) ==
+               intersection.end();
+    }
+    else
+    {
+        // check if there is any turn, that might look just as obvious, even though it might not be
+        // allowed
+        auto const is_similar_turn = [&](auto const &road) { return false; };
+
+        return std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn) ==
+               intersection.end();
+    }
+}
+
+} // namespace
+
+// Impl.
 template <typename IntersectionType> // works with Intersection and IntersectionView
 std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                                                  const IntersectionType &intersection) const
+{
+    // no obvious road
+    if (intersection.size() == 1)
+        return 0;
+
+    // a single non u-turn is obvious
+    if (intersection.size() == 2)
+        return 1;
+
+    // the way we are coming from
+    auto const &via_edge_data = node_based_graph.GetEdgeData(via_edge);
+
+    // implement a filter, taking out all roads of lower class or different names
+    auto const continues_on_name_with_higher_class = [&](auto const &road) {
+        // it needs to be possible to enter the road
+        if (!road.entry_allowed)
+            return true;
+
+        // to continue on a name, we need to have one first
+        if (via_edge_data.name_id == EMPTY_NAMEID)
+            return true;
+
+        // and we cannot loose it (roads loosing their name will be handled after this check here)
+        auto const &road_data = node_based_graph.GetEdgeData(road.eid);
+        if (road_data.name_id == EMPTY_NAMEID)
+            return true;
+
+        // the priority can only stay the same or increase. We don't consider a primary->residential
+        // or residential->service as a continuing road
+        if (strictlyLess(road_data.road_classification, via_edge_data.road_classification))
+            return true;
+
+        // most expensive check last (since we filter, we check whether the name changes
+        return util::guidance::requiresNameAnnounced(
+            via_edge_data.name_id, road_data.name_id, name_table, street_name_suffix_table);
+    };
+
+    // check if the current road continues at a given index
+    auto const road_continues_itr =
+        intersection.findClosestTurn(STRAIGHT_ANGLE, continues_on_name_with_higher_class);
+
+    std::cout << "Road: " << name_table.GetNameForID(via_edge_data.name_id) << std::endl;
+    std::cout << "Continues: " << (road_continues_itr != intersection.end()) << std::endl;
+
+    // in case the continuing road is also the straightmost turn, we consider it obvious
+    if (road_continues_itr != intersection.end() &&
+        isDistinctTurn(std::distance(intersection.begin(), road_continues_itr),
+                       intersection,
+                       via_edge,
+                       node_based_graph))
+        return std::distance(intersection.begin(), road_continues_itr);
+
+    // check for roads that allow entry only
+    auto const is_valid = [](auto const &road) { return !road.entry_allowed; };
+    auto const straightmost_turn = intersection.findClosestTurn(STRAIGHT_ANGLE, is_valid);
+
+    return 0;
+}
+
+template <typename IntersectionType> // works with Intersection and IntersectionView
+std::size_t IntersectionHandler::findObviousTurnOld(const EdgeID via_edge,
+                                                    const IntersectionType &intersection) const
 {
     using Road = typename IntersectionType::value_type;
     using EdgeData = osrm::util::NodeBasedDynamicGraph::EdgeData;
@@ -300,15 +448,15 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
         const auto &continue_data = node_based_graph.GetEdgeData(intersection[best_continue].eid);
 
         // best_continue is obvious by road class
-        if (obviousByRoadClass(in_way_data.road_classification,
-                               continue_data.road_classification,
-                               best_option_data.road_classification))
+        if (obviousByRoadClassOld(in_way_data.road_classification,
+                                  continue_data.road_classification,
+                                  best_option_data.road_classification))
             return false;
 
         // best_option is obvious by road class
-        if (obviousByRoadClass(in_way_data.road_classification,
-                               best_option_data.road_classification,
-                               continue_data.road_classification))
+        if (obviousByRoadClassOld(in_way_data.road_classification,
+                                  best_option_data.road_classification,
+                                  continue_data.road_classification))
             return true;
 
         // the best_option deviation is very straight and not a ramp
@@ -374,9 +522,9 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                 return index_candidate;
             const auto &candidate_data =
                 node_based_graph.GetEdgeData(intersection[index_candidate].eid);
-            if (obviousByRoadClass(in_way_data.road_classification,
-                                   best_option_data.road_classification,
-                                   candidate_data.road_classification))
+            if (obviousByRoadClassOld(in_way_data.road_classification,
+                                      best_option_data.road_classification,
+                                      candidate_data.road_classification))
                 return (index_candidate + 1) % intersection.size();
             else
                 return index_candidate;
@@ -389,9 +537,9 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                 return index_candidate;
             const auto candidate_data =
                 node_based_graph.GetEdgeData(intersection[index_candidate].eid);
-            if (obviousByRoadClass(in_way_data.road_classification,
-                                   best_option_data.road_classification,
-                                   candidate_data.road_classification))
+            if (obviousByRoadClassOld(in_way_data.road_classification,
+                                      best_option_data.road_classification,
+                                      candidate_data.road_classification))
                 return index_candidate - 1;
             else
                 return index_candidate;
@@ -412,13 +560,13 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
         const auto &right_data = node_based_graph.GetEdgeData(intersection[right_index].eid);
 
         const bool obvious_to_left =
-            left_index == 0 || obviousByRoadClass(in_way_data.road_classification,
-                                                  best_option_data.road_classification,
-                                                  left_data.road_classification);
+            left_index == 0 || obviousByRoadClassOld(in_way_data.road_classification,
+                                                     best_option_data.road_classification,
+                                                     left_data.road_classification);
         const bool obvious_to_right =
-            right_index == 0 || obviousByRoadClass(in_way_data.road_classification,
-                                                   best_option_data.road_classification,
-                                                   right_data.road_classification);
+            right_index == 0 || obviousByRoadClassOld(in_way_data.road_classification,
+                                                      best_option_data.road_classification,
+                                                      right_data.road_classification);
 
         // if the best_option turn isn't narrow, but there is a nearly straight turn, we don't
         // consider the turn obvious
@@ -491,9 +639,9 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
 
             const auto &turn_data = node_based_graph.GetEdgeData(intersection[i].eid);
             const bool is_obvious_by_road_class =
-                obviousByRoadClass(in_way_data.road_classification,
-                                   continue_data.road_classification,
-                                   turn_data.road_classification);
+                obviousByRoadClassOld(in_way_data.road_classification,
+                                      continue_data.road_classification,
+                                      turn_data.road_classification);
 
             // if the main road is obvious by class, we ignore the current road as a potential
             // prevention of obviousness
@@ -582,3 +730,9 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
 
     return 0;
 }
+
+} // namespace guidance
+} // namespace extractor
+} // namespace osrm
+
+#endif // OSRM_EXTRACTOR_GUIDANCE_INTERSECTION_HANDLER_HPP_

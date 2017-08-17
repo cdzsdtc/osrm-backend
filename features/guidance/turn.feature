@@ -964,13 +964,13 @@ Feature: Simple Turns
         Given the node map
             """
                   g
-
-                  f     y
-            i
-            j k a   b   x
-                  e   c
-                    d
-
+                  |
+               _--f-----y
+            i-'   |
+            j-k-a]|[b---x
+                  e  'c
+                  |'d'
+                  |
                   h
             """
 
