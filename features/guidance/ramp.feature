@@ -214,9 +214,9 @@ Feature: Ramp Guidance
             | bd    | motorway_link |
 
        When I route I should get
-            | waypoints | route     | turns                                 |
+            | waypoints | route     | turns                              |
             | a,d       | abc,bd,bd | depart,on ramp slight right,arrive |
-            | a,c       | abc,abc   | depart,arrive                         |
+            | a,c       | abc,abc   | depart,arrive                      |
 
     Scenario: Two Ramps Joining into common Motorway
         Given the node map
