@@ -143,7 +143,7 @@ inline bool strictlyLess(const RoadClassification lhs, const RoadClassification 
     const auto constexpr num_dividers = 6;
     const constexpr RoadPriorityClass::Enum dividers[num_dividers] = {
         RoadPriorityClass::TRUNK_LINK,
-        RoadPriorityClass::TERTIARY_LINK,
+        RoadPriorityClass::SECONDARY_LINK,
         RoadPriorityClass::SIDE_RESIDENTIAL,
         RoadPriorityClass::ALLEY,
         RoadPriorityClass::PARKING,

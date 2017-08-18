@@ -158,9 +158,12 @@ inline bool isDistinctTurn(const std::size_t index,
     // narrow turn, having two choices one of which is forbidden is fine. In case of a end of the
     // road turn, having two directions and not being allowed to turn onto one of them isn't always
     // as clear
-    auto const candidate_deviation = util::angularDeviation(intersection[index].angle, STRAIGHT_ANGLE);
+    auto const candidate_deviation =
+        util::angularDeviation(intersection[index].angle, STRAIGHT_ANGLE);
     if (candidate_deviation <= NARROW_TURN_ANGLE)
     {
+        std::cout << "Narrow" << std::endl;
+
         // if the road is not taking a turn at all, we consider it distinct, even though other close
         // turns might exist
         if (candidate_deviation <= MAXIMAL_ALLOWED_NO_TURN_DEVIATION)
@@ -175,27 +178,63 @@ inline bool isDistinctTurn(const std::size_t index,
 
             // since we have a narrow turn, we only care for roads allowing entry
             if (!road.entry_allowed)
+            {
+                std::cout << "Not similar (2)" << std::endl;
                 return false;
+            }
 
             auto const compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
             // at least a relative and a maximum difference
             if (compare_deviation / candidate_deviation > DISTINCTION_RATIO &&
                 std::abs(compare_deviation - candidate_deviation) > FUZZY_ANGLE_DIFFERENCE)
+            {
+                std::cout << "Compare ratio fails" << std::endl;
                 return false;
+            }
 
             // since the angle and allowed match, we compare road categories. Passing a low priority
             // road allows us to consider it non obvious
-            return !distinct_by_class(road);
+            if (distinct_by_class(road))
+            {
+                std::cout << "Not similar (3)" << std::endl;
+                return false;
+            }
+
+            std::cout << "Similar" << std::endl;
+            return true;
         };
 
-        return std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn) ==
-               intersection.end();
+        auto const itr = std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn);
+        return itr == intersection.end();
     }
     else
     {
+        // deviation is larger than NARROW_TURN_ANGLE0 here for the candidate
+
         // check if there is any turn, that might look just as obvious, even though it might not be
-        // allowed
-        auto const is_similar_turn = [&](auto const &road) { return false; };
+        // allowed. Entry-allowed isn't considered a valid distinction criterion here
+        auto const is_similar_turn = [&](auto const &road) {
+            // skip over our candidate
+            if (road.eid == intersection[index].eid)
+                return false;
+
+            // we do not consider roads of far lesser category to be more obvious
+            const auto &compare_data = node_based_graph.GetEdgeData(road.eid);
+            if (strictlyLess(compare_data.road_classification, candidate_data.road_classification))
+                return false;
+
+            // if the turn is much stronger, we are also fine (note that we do not have to check
+            // absolutes, since candidate is at least > NARROW_TURN_ANGLE
+            const auto compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
+            if (compare_deviation / candidate_deviation > DISTINCTION_RATIO)
+                return false;
+
+            // if the class is just not on the same level
+            if (distinct_by_class(road))
+                return false;
+
+            return true;
+        };
 
         return std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn) ==
                intersection.end();
@@ -217,6 +256,11 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     if (intersection.size() == 2)
         return 1;
 
+
+    std::cout << "[intersection]\n";
+    for( auto road : intersection )
+        std::cout << "\t" << toString(road) << std::endl;
+
     // the way we are coming from
     auto const &via_edge_data = node_based_graph.GetEdgeData(via_edge);
 
@@ -230,7 +274,7 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
         if (via_edge_data.name_id == EMPTY_NAMEID)
             return true;
 
-        // and we cannot loose it (roads loosing their name will be handled after this check here)
+        // and we cannot yloose it (roads loosing their name will be handled after this check here)
         auto const &road_data = node_based_graph.GetEdgeData(road.eid);
         if (road_data.name_id == EMPTY_NAMEID)
             return true;
@@ -238,6 +282,10 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
         // the priority can only stay the same or increase. We don't consider a primary->residential
         // or residential->service as a continuing road
         if (strictlyLess(road_data.road_classification, via_edge_data.road_classification))
+            return true;
+
+        // filter out link classes to our current class, since they should only be connectivity
+        if (isLinkTo(road_data.road_classification, via_edge_data.road_classification))
             return true;
 
         // most expensive check last (since we filter, we check whether the name changes
@@ -249,20 +297,52 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     auto const road_continues_itr =
         intersection.findClosestTurn(STRAIGHT_ANGLE, continues_on_name_with_higher_class);
 
-    std::cout << "Road: " << name_table.GetNameForID(via_edge_data.name_id) << std::endl;
     std::cout << "Continues: " << (road_continues_itr != intersection.end()) << std::endl;
 
-    // in case the continuing road is also the straightmost turn, we consider it obvious
+    // in case the continuing road is distinct, we prefer continuing on the current road. Only if
+    // continue does not exist or we are not distinct, we look for other possible candidates
     if (road_continues_itr != intersection.end() &&
         isDistinctTurn(std::distance(intersection.begin(), road_continues_itr),
                        intersection,
                        via_edge,
                        node_based_graph))
+    {
+        std::cout << "Found: " << std::distance(intersection.begin(),road_continues_itr) << " to be obvious." << std::endl;
         return std::distance(intersection.begin(), road_continues_itr);
+    }
+
+    // The road doesn't continue in an obvious fashion. At least we see the start of a new road
+    // here, which might be more obvious than (for example) a turning road of the same name. The
+    // next goal is to find a road which is going more or less straight, but is also a matching
+    // category. So if we are on a primary that has an alley right ahead, the alley will not
+    // quality. But if primary goes straight onto secondary / turns left into primary. We would
+    // consider the secondary a candidate.
+
+    // opposed to before, we do not care about name changes, again: this is a filter, so internal
+    // false/true will be negated for selection
+    auto const valid_of_higher_or_same_category = [&](auto const &road) {
+        if (!road.entry_allowed)
+            return true;
+
+        auto const &road_data = node_based_graph.GetEdgeData(road.eid);
+        if (strictlyLess(road_data.road_classification, via_edge_data.road_classification))
+            return true;
+
+        if (isLinkTo(road_data.road_classification, via_edge_data.road_classification))
+            return true;
+
+        return false;
+    };
 
     // check for roads that allow entry only
-    auto const is_valid = [](auto const &road) { return !road.entry_allowed; };
-    auto const straightmost_turn = intersection.findClosestTurn(STRAIGHT_ANGLE, is_valid);
+    auto const straightmost_turn_itr =
+        intersection.findClosestTurn(STRAIGHT_ANGLE, valid_of_higher_or_same_category);
+    if (straightmost_turn_itr != intersection.end() &&
+        isDistinctTurn(std::distance(intersection.begin(), straightmost_turn_itr),
+                       intersection,
+                       via_edge,
+                       node_based_graph))
+        return std::distance(intersection.begin(), straightmost_turn_itr);
 
     return 0;
 }

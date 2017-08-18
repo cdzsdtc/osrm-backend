@@ -24,7 +24,8 @@ namespace
 
 inline bool isMotorwayClass(EdgeID eid, const util::NodeBasedDynamicGraph &node_based_graph)
 {
-    return node_based_graph.GetEdgeData(eid).road_classification.IsMotorwayClass();
+    auto const& classification = node_based_graph.GetEdgeData(eid).road_classification;
+    return classification.IsMotorwayClass() && !classification.IsLinkClass();
 }
 inline RoadClassification roadClass(const ConnectedRoad &road,
                                     const util::NodeBasedDynamicGraph &graph)
@@ -101,18 +102,9 @@ operator()(const NodeID, const EdgeID via_eid, Intersection intersection) const
 
 Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection intersection) const
 {
+    std::cout << "From motorway" << std::endl;
     const auto &in_data = node_based_graph.GetEdgeData(via_eid);
     BOOST_ASSERT(isMotorwayClass(via_eid, node_based_graph));
-
-    const auto countExitingMotorways = [this](const Intersection &intersection) {
-        unsigned count = 0;
-        for (const auto &road : intersection)
-        {
-            if (road.entry_allowed && isMotorwayClass(road.eid, node_based_graph))
-                ++count;
-        }
-        return count;
-    };
 
     // find the angle that continues on our current highway
     const auto getContinueAngle = [this, in_data](const Intersection &intersection) {
@@ -134,34 +126,13 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
         return intersection[0].angle;
     };
 
-    const auto getMostLikelyContinue = [this, in_data](const Intersection &intersection) {
-        double angle = intersection[0].angle;
-        double best = 180;
-        for (const auto &road : intersection)
-        {
-            if (isMotorwayClass(road.eid, node_based_graph) &&
-                angularDeviation(road.angle, STRAIGHT_ANGLE) < best)
-            {
-                best = angularDeviation(road.angle, STRAIGHT_ANGLE);
-                angle = road.angle;
-            }
-        }
-        return angle;
-    };
+    // continue_pos == 0 if no continue
+    auto const continue_pos = findObviousTurn(via_eid, intersection);
+    auto continue_angle = intersection[continue_pos].angle;
 
-    const auto findBestContinue = [&]() {
-        const double continue_angle = getContinueAngle(intersection);
-        if (continue_angle != intersection[0].angle)
-            return continue_angle;
-        else
-            return getMostLikelyContinue(intersection);
-    };
-
-    // find continue angle
-    const double continue_angle = findBestContinue();
-    // highway does not continue and has no obvious choice
-    if (continue_angle == intersection[0].angle)
+    if (continue_pos == 0)
     {
+        std::cout << "No continue (" << intersection.size() << ")" << std::endl;
         if (intersection.size() == 2)
         {
             // do not announce ramps at the end of a highway
@@ -204,7 +175,19 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
     }
     else
     {
-        const unsigned exiting_motorways = countExitingMotorways(intersection);
+        // for counting how many exiting roads are motorways that allow entry
+        const auto is_motorway_entry = [this](const auto &road)
+        {
+            if (!road.entry_allowed)
+                return false;
+
+            auto const &road_class = node_based_graph.GetEdgeData(road.eid).road_classification;
+            return road_class.IsMotorwayClass() && !road_class.IsLinkClass();
+        };
+
+        const unsigned exiting_motorways =
+            std::count_if(intersection.begin() + 1, intersection.end(), is_motorway_entry);
+        std::cout << "Have continuing motorway (" << exiting_motorways << ")" << std::endl;
 
         if (exiting_motorways == 0)
         {
@@ -233,6 +216,7 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
             }
             else
             {
+                std::cout << "Single exit" << std::endl;
                 // Normal Highway exit or merge
                 for (auto &road : intersection)
                 {
@@ -242,6 +226,7 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
 
                     if (road.angle == continue_angle)
                     {
+                        std::cout << "Motorway continue" << std::endl;
                         road.instruction = getInstructionForObvious(
                             intersection.size(), via_eid, isThroughStreet(1, intersection), road);
                     }
