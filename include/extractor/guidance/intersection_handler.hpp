@@ -172,11 +172,6 @@ inline bool isDistinctTurn(const std::size_t index,
     {
         std::cout << "Narrow" << std::endl;
 
-        // if the road is not taking a turn at all, we consider it distinct, even though other close
-        // turns might exist
-        if (candidate_deviation <= MAXIMAL_ALLOWED_NO_TURN_DEVIATION)
-            return true;
-
         // check if there are other narrow turns are not considered passing a low category or simply
         // a link of the same type as the potentially obvious turn
         auto const is_similar_turn = [&](auto const &road) {
@@ -194,10 +189,10 @@ inline bool isDistinctTurn(const std::size_t index,
 
             auto const compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
             // at least a relative and a maximum difference
-            if (compare_deviation / candidate_deviation > DISTINCTION_RATIO &&
+            if (compare_deviation / std::max(0.1,candidate_deviation) > DISTINCTION_RATIO &&
                 std::abs(compare_deviation - candidate_deviation) > FUZZY_ANGLE_DIFFERENCE)
             {
-                std::cout << "Compare ratio fails" << std::endl;
+                std::cout << "Compare ratio fails (" << compare_deviation / (std::max(candidate_deviation,0.1)) << ", " <<  std::abs(compare_deviation - candidate_deviation) << ")" << std::endl;
                 return false;
             }
 
@@ -311,10 +306,12 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     // in case the continuing road is distinct, we prefer continuing on the current road. Only if
     // continue does not exist or we are not distinct, we look for other possible candidates
     if (road_continues_itr != intersection.end() &&
-        isDistinctTurn(std::distance(intersection.begin(), road_continues_itr),
-                       intersection,
-                       via_edge,
-                       node_based_graph))
+        (isDistinctTurn(std::distance(intersection.begin(), road_continues_itr),
+                        intersection,
+                        via_edge,
+                        node_based_graph) ||
+         (util::angularDeviation(road_continues_itr->angle, STRAIGHT_ANGLE) <
+          MAXIMAL_ALLOWED_NO_TURN_DEVIATION)))
     {
         std::cout << "Found: " << std::distance(intersection.begin(), road_continues_itr)
                   << " to be obvious." << std::endl;
@@ -356,7 +353,11 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                        intersection,
                        via_edge,
                        node_based_graph))
+    {
+        std::cout << "Found " << std::distance(intersection.begin(), straightmost_turn_itr)
+                  << " to be obvious." << std::endl;
         return std::distance(intersection.begin(), straightmost_turn_itr);
+    }
 
     return 0;
 }
