@@ -164,15 +164,6 @@ inline bool isDistinctTurn(const std::size_t index,
             isLinkTo(compare_data.road_classification, candidate_data.road_classification))
             return true;
 
-        // switching the general road class within a turn is not a likely maneuver. We consider a
-        // turn distinct enough (given it's straight/narrow continue), if it's road class differs
-        // from other turns
-        if ((getRoadGroup(via_edge_data.road_classification) !=
-             getRoadGroup(compare_data.road_classification)) &&
-            (via_edge_data.road_classification.GetPriority() ==
-             candidate_data.road_classification.GetPriority()))
-            return true;
-
         return false;
     };
 
@@ -220,6 +211,16 @@ inline bool isDistinctTurn(const std::size_t index,
                 return false;
             }
 
+            auto const &compare_data = node_based_graph.GetEdgeData(road.eid);
+            // switching the general road class within a turn is not a likely maneuver. We consider
+            // a turn distinct enough (given it's straight/narrow continue), if it's road class
+            // differs from other turns
+            if ((getRoadGroup(via_edge_data.road_classification) !=
+                 getRoadGroup(compare_data.road_classification)) &&
+                (via_edge_data.road_classification.GetPriority() ==
+                 candidate_data.road_classification.GetPriority()))
+                return false;
+
             std::cout << "Similar" << std::endl;
             return true;
         };
@@ -244,15 +245,32 @@ inline bool isDistinctTurn(const std::size_t index,
             if (strictlyLess(compare_data.road_classification, candidate_data.road_classification))
                 return false;
 
+            // if the class is just not on the same level
+            if (distinct_by_class(road))
+            {
+                std::cout << "Distinct by class" << std::endl;
+                return false;
+            }
+
+            // just as above,  switching the general road class within a turn is not a likely maneuver. We consider
+            // a turn distinct enough (given it's straight/narrow continue), if it's road class
+            // differs from other turns. However, the difference in angles between the two needs to be reasonable as well
+            if (util::angularDeviation(road.angle,intersection[index].angle) < 100 && (
+                (getRoadGroup(via_edge_data.road_classification) !=
+                 getRoadGroup(compare_data.road_classification)) &&
+                (via_edge_data.road_classification.GetPriority() ==
+                 candidate_data.road_classification.GetPriority())))
+                return false;
+
+
             // if the turn is much stronger, we are also fine (note that we do not have to check
             // absolutes, since candidate is at least > NARROW_TURN_ANGLE
             const auto compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
             if (compare_deviation / candidate_deviation > DISTINCTION_RATIO)
+            {
+                std::cout << "Distinct by deviation" << std::endl;
                 return false;
-
-            // if the class is just not on the same level
-            if (distinct_by_class(road))
-                return false;
+            }
 
             return true;
         };
