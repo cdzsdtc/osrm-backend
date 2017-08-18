@@ -24,7 +24,7 @@ namespace
 
 inline bool isMotorwayClass(EdgeID eid, const util::NodeBasedDynamicGraph &node_based_graph)
 {
-    auto const& classification = node_based_graph.GetEdgeData(eid).road_classification;
+    auto const &classification = node_based_graph.GetEdgeData(eid).road_classification;
     return classification.IsMotorwayClass() && !classification.IsLinkClass();
 }
 inline RoadClassification roadClass(const ConnectedRoad &road,
@@ -57,27 +57,19 @@ bool MotorwayHandler::canProcess(const NodeID,
                                  const EdgeID via_eid,
                                  const Intersection &intersection) const
 {
-    bool has_motorway = false;
-    bool has_normal_roads = false;
-
-    for (const auto &road : intersection)
-    {
-        // not merging or forking?
-        if (road.entry_allowed && angularDeviation(road.angle, STRAIGHT_ANGLE) > 60)
-            return false;
-        else if (isMotorwayClass(road.eid, node_based_graph))
-        {
-            if (road.entry_allowed)
-                has_motorway = true;
-        }
-        else if (!isRampClass(road.eid, node_based_graph))
-            has_normal_roads = true;
-    }
-
-    if (has_normal_roads)
+    // the road we come from needs to be a motorway
+    if (!node_based_graph.GetEdgeData(via_eid).road_classification.IsMotorwayClass())
         return false;
 
-    return has_motorway || isMotorwayClass(via_eid, node_based_graph);
+    // all adjacent roads that allow turns need to be motorway classes and narrow turns
+    auto const is_non_motorway_class_or_not_narrow = [&](auto const &road) {
+        if (road.entry_allowed && angularDeviation(road.angle, STRAIGHT_ANGLE) > 60)
+            return true;
+
+        return !node_based_graph.GetEdgeData(road.eid).road_classification.IsMotorwayClass();
+    };
+    return !std::any_of(
+        intersection.begin(), intersection.end(), is_non_motorway_class_or_not_narrow);
 }
 
 Intersection MotorwayHandler::
@@ -102,29 +94,7 @@ operator()(const NodeID, const EdgeID via_eid, Intersection intersection) const
 
 Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection intersection) const
 {
-    std::cout << "From motorway" << std::endl;
-    const auto &in_data = node_based_graph.GetEdgeData(via_eid);
     BOOST_ASSERT(isMotorwayClass(via_eid, node_based_graph));
-
-    // find the angle that continues on our current highway
-    const auto getContinueAngle = [this, in_data](const Intersection &intersection) {
-        for (const auto &road : intersection)
-        {
-            if (!road.entry_allowed)
-                continue;
-
-            const auto &out_data = node_based_graph.GetEdgeData(road.eid);
-
-            const auto same_name = !util::guidance::requiresNameAnnounced(
-                in_data.name_id, out_data.name_id, name_table, street_name_suffix_table);
-
-            if (road.angle != 0 && in_data.name_id != EMPTY_NAMEID &&
-                out_data.name_id != EMPTY_NAMEID && same_name &&
-                isMotorwayClass(road.eid, node_based_graph))
-                return road.angle;
-        }
-        return intersection[0].angle;
-    };
 
     // continue_pos == 0 if no continue
     auto const continue_pos = findObviousTurn(via_eid, intersection);
@@ -132,7 +102,6 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
 
     if (continue_pos == 0)
     {
-        std::cout << "No continue (" << intersection.size() << ")" << std::endl;
         if (intersection.size() == 2)
         {
             // do not announce ramps at the end of a highway
@@ -176,8 +145,7 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
     else
     {
         // for counting how many exiting roads are motorways that allow entry
-        const auto is_motorway_entry = [this](const auto &road)
-        {
+        const auto is_motorway_entry = [this](const auto &road) {
             if (!road.entry_allowed)
                 return false;
 
@@ -187,7 +155,6 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
 
         const unsigned exiting_motorways =
             std::count_if(intersection.begin() + 1, intersection.end(), is_motorway_entry);
-        std::cout << "Have continuing motorway (" << exiting_motorways << ")" << std::endl;
 
         if (exiting_motorways == 0)
         {
@@ -216,7 +183,6 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
             }
             else
             {
-                std::cout << "Single exit" << std::endl;
                 // Normal Highway exit or merge
                 for (auto &road : intersection)
                 {
@@ -326,6 +292,88 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
 
 Intersection MotorwayHandler::fromRamp(const EdgeID via_eid, Intersection intersection) const
 {
+    auto const is_link_road = [&](auto const &road) {
+        return node_based_graph.GetEdgeData(road.eid).road_classification.IsRampClass();
+    };
+    auto const all_ramps = std::all_of(intersection.begin(), intersection.end(), is_link_road);
+
+    // in case all entries are ramps
+    if (all_ramps)
+    {
+        std::vector<std::size_t> valids;
+        for (std::size_t i = 1; i < intersection.size(); ++i)
+            if (intersection[i].entry_allowed)
+                valids.push_back(i);
+
+        auto const obvious = findObviousTurn(via_eid, intersection);
+        if (obvious != 0)
+        {
+            // if only two roads exit, we are looking at a ramp forking off from a different exit
+            if (valids.size() == 2)
+            {
+                if (valids[0] == obvious)
+                {
+                    intersection[valids[0]].instruction =
+                        getInstructionForObvious(intersection.size(),
+                                                 via_eid,
+                                                 isThroughStreet(valids[0], intersection),
+                                                 intersection[valids[0]]);
+                    intersection[valids[1]].instruction = {
+                        findBasicTurnType(via_eid, intersection[valids[1]]),
+                        getTurnDirection(intersection[valids[1]].angle)};
+                }
+                else
+                {
+                    intersection[valids[1]].instruction =
+                        getInstructionForObvious(intersection.size(),
+                                                 via_eid,
+                                                 isThroughStreet(valids[1], intersection),
+                                                 intersection[valids[1]]);
+                    intersection[valids[0]].instruction = {
+                        findBasicTurnType(via_eid, intersection[valids[0]]),
+                        getTurnDirection(intersection[valids[0]].angle)};
+                }
+            }
+            else
+            {
+                // announce as basic turns
+                for (std::size_t i = 1; i < intersection.size(); ++i)
+                {
+                    auto &road = intersection[i];
+                    if (road.eid == intersection[obvious].eid)
+                    {
+                        road.instruction = getInstructionForObvious(
+                            intersection.size(), via_eid, isThroughStreet(i, intersection), road);
+                    }
+                    else
+                    {
+                        road.instruction = {findBasicTurnType(via_eid, road),
+                                            getTurnDirection(road.angle)};
+                    }
+                }
+            }
+        }
+        else
+        {
+            // two non-obvious highway ramps, announce as a fork
+            if (valids.size() == 2)
+            {
+                // left road comes first, we find the right first though. Therefore we have to use
+                // `1` first
+                assignFork(via_eid, intersection[valids[1]], intersection[valids[0]]);
+            }
+            else
+            {
+                // announce as basic turns
+                for (auto &road : intersection)
+                    road.instruction = {findBasicTurnType(via_eid, road),
+                                        getTurnDirection(road.angle)};
+            }
+        }
+        return intersection;
+    }
+
+    std::cout << "From Ramp" << std::endl;
     auto num_valid_turns = intersection.countEnterable();
     // ramp straight into a motorway/ramp
     if (intersection.size() == 2 && num_valid_turns == 1)

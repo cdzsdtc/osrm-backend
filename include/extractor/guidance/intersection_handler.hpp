@@ -142,6 +142,14 @@ inline bool isDistinctTurn(const std::size_t index,
         // passing a road of a stricly lower category (e.g. residential driving past driveway,
         // primary road passing a residential road) but also exiting a freeway onto a primary in the
         // presence of an alley
+        std::cout << "Road classes: " << compare_data.road_classification.GetPriority() << " "
+                  << via_edge_data.road_classification.GetPriority() << " "
+                  << candidate_data.road_classification.GetPriority() << std::endl;
+        std::cout << "Strictly less: " << strictlyLess(compare_data.road_classification,
+                                                       via_edge_data.road_classification)
+                  << " " << strictlyLess(compare_data.road_classification,
+                                         candidate_data.road_classification)
+                  << std::endl;
         if (strictlyLess(compare_data.road_classification, via_edge_data.road_classification) &&
             strictlyLess(compare_data.road_classification, candidate_data.road_classification))
             return true;
@@ -176,6 +184,7 @@ inline bool isDistinctTurn(const std::size_t index,
             if (road.eid == intersection[index].eid)
                 return false;
 
+            std::cout << "Checking: " << road.eid << std::endl;
             // since we have a narrow turn, we only care for roads allowing entry
             if (!road.entry_allowed)
             {
@@ -204,7 +213,8 @@ inline bool isDistinctTurn(const std::size_t index,
             return true;
         };
 
-        auto const itr = std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn);
+        auto const itr =
+            std::find_if(intersection.begin() + 1, intersection.end(), is_similar_turn);
         return itr == intersection.end();
     }
     else
@@ -256,9 +266,8 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     if (intersection.size() == 2)
         return 1;
 
-
     std::cout << "[intersection]\n";
-    for( auto road : intersection )
+    for (auto road : intersection)
         std::cout << "\t" << toString(road) << std::endl;
 
     // the way we are coming from
@@ -307,7 +316,8 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                        via_edge,
                        node_based_graph))
     {
-        std::cout << "Found: " << std::distance(intersection.begin(),road_continues_itr) << " to be obvious." << std::endl;
+        std::cout << "Found: " << std::distance(intersection.begin(), road_continues_itr)
+                  << " to be obvious." << std::endl;
         return std::distance(intersection.begin(), road_continues_itr);
     }
 
@@ -337,6 +347,10 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     // check for roads that allow entry only
     auto const straightmost_turn_itr =
         intersection.findClosestTurn(STRAIGHT_ANGLE, valid_of_higher_or_same_category);
+
+    std::cout << "Found straightmost of same or higher at: "
+              << std::distance(intersection.begin(), straightmost_turn_itr) << std::endl;
+
     if (straightmost_turn_itr != intersection.end() &&
         isDistinctTurn(std::distance(intersection.begin(), straightmost_turn_itr),
                        intersection,

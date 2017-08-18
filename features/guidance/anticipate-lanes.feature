@@ -137,9 +137,9 @@ Feature: Turn Lane Guidance
     # https://www.openstreetmap.org/way/4484007#map=18/52.70439/13.20269
         Given the node map
             """
-            i               a
-              ' .       . '
-            j – – c – b – – x
+            x - - b - c - - j
+                .       .
+            a '           ' i
             """
 
         And the ways

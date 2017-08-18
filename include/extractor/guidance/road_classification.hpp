@@ -141,16 +141,17 @@ inline bool strictlyLess(const RoadClassification lhs, const RoadClassification 
 {
     // a list of dividers (inclusive) specifying the end of a class
     const auto constexpr num_dividers = 6;
+    // dividers point one past the entry we want, so motorways will be pre-primary
     const constexpr RoadPriorityClass::Enum dividers[num_dividers] = {
-        RoadPriorityClass::TRUNK_LINK,
-        RoadPriorityClass::SECONDARY_LINK,
-        RoadPriorityClass::SIDE_RESIDENTIAL,
+        RoadPriorityClass::PRIMARY,
+        RoadPriorityClass::TERTIARY_LINK,
         RoadPriorityClass::ALLEY,
-        RoadPriorityClass::PARKING,
-        RoadPriorityClass::CONNECTIVITY};
+        RoadPriorityClass::LINK_ROAD,
+        RoadPriorityClass::BIKE_PATH,
+        RoadPriorityClass::CONNECTIVITY+1};
     const auto lhs_class = std::upper_bound(dividers, dividers + num_dividers, lhs.GetPriority());
     const auto rhs_class = std::upper_bound(dividers, dividers + num_dividers, rhs.GetPriority());
-    return lhs_class < rhs_class;
+    return *lhs_class > *rhs_class;
 }
 
 // check whether a link class is the fitting link class to a road
