@@ -70,6 +70,16 @@ class IntersectionHandler
     std::size_t findObviousTurnOld(const EdgeID via_edge,
                                    const IntersectionType &intersection) const;
 
+    template <typename IntersectionType> // works with Intersection and IntersectionView
+    inline bool isDistinctTurn(const std::size_t index,
+                               const EdgeID via_edge,
+                               const IntersectionType &intersection) const;
+
+    template <typename IntersectionType> // works with Intersection and IntersectionView
+    inline bool isDistinctContinue(const std::size_t index,
+                                   const EdgeID via_edge,
+                                   const IntersectionType &intersection) const;
+
     // Obvious turns can still take multiple forms. This function looks at the turn onto a road
     // candidate when coming from a via_edge and determines the best instruction to emit.
     // `through_street` indicates if the street turned onto is a through sreet (think mergees and
@@ -121,14 +131,10 @@ class IntersectionHandler
     bool isSameName(const EdgeID source_edge_id, const EdgeID target_edge_id) const;
 };
 
-namespace
-{
-
 template <typename IntersectionType> // works with Intersection and IntersectionView
-inline bool isDistinctTurn(const std::size_t index,
-                           const IntersectionType &intersection,
-                           const EdgeID via_edge,
-                           const util::NodeBasedDynamicGraph &node_based_graph)
+inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
+                                                const EdgeID via_edge,
+                                                const IntersectionType &intersection) const
 {
     // for comparing road categories
     const auto &via_edge_data = node_based_graph.GetEdgeData(via_edge);
@@ -173,9 +179,14 @@ inline bool isDistinctTurn(const std::size_t index,
     // as clear
     auto const candidate_deviation =
         util::angularDeviation(intersection[index].angle, STRAIGHT_ANGLE);
+
     if (candidate_deviation <= NARROW_TURN_ANGLE)
     {
         std::cout << "Narrow" << std::endl;
+
+        // check if the candidate changes it's name
+        auto const candidate_changes_name = util::guidance::requiresNameAnnounced(
+            via_edge_data.name_id, candidate_data.name_id, name_table, street_name_suffix_table);
 
         // check if there are other narrow turns are not considered passing a low category or simply
         // a link of the same type as the potentially obvious turn
@@ -193,8 +204,44 @@ inline bool isDistinctTurn(const std::size_t index,
             }
 
             auto const compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
-            // at least a relative and a maximum difference
-            if (compare_deviation / std::max(0.1, candidate_deviation) > DISTINCTION_RATIO &&
+            auto const &compare_data = node_based_graph.GetEdgeData(road.eid);
+
+            // to find whether a continuing road is turning, we need to check if it is an actual
+            // turn, a segregated intersection
+
+            auto const opposing_turn =
+                intersection.FindClosestBearing(util::bearing::reverse(road.bearing));
+            auto const opposing_data = node_based_graph.GetEdgeData(opposing_turn->eid);
+            // Check for a situation like:
+            //
+            //     a
+            //     a
+            // a a + b b
+            //     c
+            //     c
+            //
+            // opposed to
+            //
+            //     a
+            //     a
+            // a a + b b
+            //     a
+            //     a
+            auto const continue_turns =
+                !util::guidance::requiresNameAnnounced(via_edge_data.name_id,
+                                                       compare_data.name_id,
+                                                       name_table,
+                                                       street_name_suffix_table) &&
+                util::guidance::requiresNameAnnounced(
+                    opposing_data.name_id, compare_data.name_id, name_table, street_name_suffix_table);
+            auto const continuing_road_takes_a_turn = candidate_changes_name && continue_turns;
+
+            // at least a relative and a maximum difference, if the road name does not turn.
+            // Since we can announce `stay on X for 2 miles, we need to ensure that we announce
+            // turns off it (even if straight). Otherwise people might follow X further than they
+            // should
+            if (!continuing_road_takes_a_turn &&
+                compare_deviation / std::max(0.1, candidate_deviation) > DISTINCTION_RATIO &&
                 std::abs(compare_deviation - candidate_deviation) > FUZZY_ANGLE_DIFFERENCE)
             {
                 std::cout << "Compare ratio fails ("
@@ -211,10 +258,9 @@ inline bool isDistinctTurn(const std::size_t index,
                 return false;
             }
 
-            auto const &compare_data = node_based_graph.GetEdgeData(road.eid);
             // switching the general road class within a turn is not a likely maneuver. We consider
             // a turn distinct enough (given it's straight/narrow continue), if it's road class
-            // differs from other turns
+            // differs from other turns (and is of a lesser category)
             if ((getRoadGroup(via_edge_data.road_classification) !=
                  getRoadGroup(compare_data.road_classification)) &&
                 (via_edge_data.road_classification.GetPriority() ==
@@ -252,16 +298,17 @@ inline bool isDistinctTurn(const std::size_t index,
                 return false;
             }
 
-            // just as above,  switching the general road class within a turn is not a likely maneuver. We consider
+            // just as above,  switching the general road class within a turn is not a likely
+            // maneuver. We consider
             // a turn distinct enough (given it's straight/narrow continue), if it's road class
-            // differs from other turns. However, the difference in angles between the two needs to be reasonable as well
-            if (util::angularDeviation(road.angle,intersection[index].angle) < 100 && (
-                (getRoadGroup(via_edge_data.road_classification) !=
-                 getRoadGroup(compare_data.road_classification)) &&
-                (via_edge_data.road_classification.GetPriority() ==
-                 candidate_data.road_classification.GetPriority())))
+            // differs from other turns. However, the difference in angles between the two needs to
+            // be reasonable as well
+            if (util::angularDeviation(road.angle, intersection[index].angle) < 100 &&
+                ((getRoadGroup(via_edge_data.road_classification) !=
+                  getRoadGroup(compare_data.road_classification)) &&
+                 (via_edge_data.road_classification.GetPriority() ==
+                  candidate_data.road_classification.GetPriority())))
                 return false;
-
 
             // if the turn is much stronger, we are also fine (note that we do not have to check
             // absolutes, since candidate is at least > NARROW_TURN_ANGLE
@@ -281,13 +328,12 @@ inline bool isDistinctTurn(const std::size_t index,
 }
 
 template <typename IntersectionType> // works with Intersection and IntersectionView
-inline bool isDistinctContinue(const std::size_t index,
-                               const IntersectionType &intersection,
-                               const EdgeID via_edge,
-                               const util::NodeBasedDynamicGraph &node_based_graph)
+inline bool IntersectionHandler::isDistinctContinue(const std::size_t index,
+                                                    const EdgeID via_edge,
+                                                    const IntersectionType &intersection) const
 {
     // if its good enough for a turn, it's good enough for a continue
-    if (isDistinctTurn(index, intersection, via_edge, node_based_graph))
+    if (isDistinctTurn(index, via_edge, intersection))
         return true;
 
     auto const in_classification = node_based_graph.GetEdgeData(via_edge).road_classification;
@@ -302,8 +348,6 @@ inline bool isDistinctContinue(const std::size_t index,
 
     return false;
 }
-
-} // namespace
 
 // Impl.
 template <typename IntersectionType> // works with Intersection and IntersectionView
@@ -363,10 +407,8 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     // in case the continuing road is distinct, we prefer continuing on the current road. Only if
     // continue does not exist or we are not distinct, we look for other possible candidates
     if (road_continues_itr != intersection.end() &&
-        isDistinctContinue(std::distance(intersection.begin(), road_continues_itr),
-                           intersection,
-                           via_edge,
-                           node_based_graph))
+        isDistinctContinue(
+            std::distance(intersection.begin(), road_continues_itr), via_edge, intersection))
     {
         std::cout << "Found: " << std::distance(intersection.begin(), road_continues_itr)
                   << " to be obvious." << std::endl;
@@ -404,10 +446,8 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
               << std::distance(intersection.begin(), straightmost_turn_itr) << std::endl;
 
     if (straightmost_turn_itr != intersection.end() &&
-        isDistinctTurn(std::distance(intersection.begin(), straightmost_turn_itr),
-                       intersection,
-                       via_edge,
-                       node_based_graph))
+        isDistinctTurn(
+            std::distance(intersection.begin(), straightmost_turn_itr), via_edge, intersection))
     {
         std::cout << "Found " << std::distance(intersection.begin(), straightmost_turn_itr)
                   << " to be obvious." << std::endl;

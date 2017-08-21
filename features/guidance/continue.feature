@@ -20,7 +20,7 @@ Feature: Continue Instructions
        When I route I should get
             | waypoints | route       | turns                       |
             | a,c       | abc,abc,abc | depart,continue left,arrive |
-            | a,d       | abc,bd      | depart,arrive               |
+            | a,d       | abc,bd,bd   | depart,turn straight,arrive |
 
     Scenario: Road turning left, Suffix changes
         Given the node map
