@@ -214,11 +214,11 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
             auto const opposing_data = node_based_graph.GetEdgeData(opposing_turn->eid);
             // Check for a situation like:
             //
-            //     a
-            //     a
-            // a a + b b
-            //     c
-            //     c
+            //     a         a
+            //     a         a
+            // a a + b b     + b b
+            //     c        ac
+            //     c      a  c
             //
             // opposed to
             //
@@ -232,8 +232,12 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
                                                        compare_data.name_id,
                                                        name_table,
                                                        street_name_suffix_table) &&
-                util::guidance::requiresNameAnnounced(
-                    opposing_data.name_id, compare_data.name_id, name_table, street_name_suffix_table);
+                (util::angularDeviation(road.angle, opposing_turn->angle) <
+                     (STRAIGHT_ANGLE - NARROW_TURN_ANGLE) ||
+                 util::guidance::requiresNameAnnounced(opposing_data.name_id,
+                                                       compare_data.name_id,
+                                                       name_table,
+                                                       street_name_suffix_table));
             auto const continuing_road_takes_a_turn = candidate_changes_name && continue_turns;
 
             // at least a relative and a maximum difference, if the road name does not turn.
