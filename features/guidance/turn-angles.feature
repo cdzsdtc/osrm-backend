@@ -388,15 +388,15 @@ Feature: Simple Turns
             | gehijb | turn | yes    | 3     |
 
         When I route I should get
-            | waypoints | route          | turns                        |
-            | a,c       | road,road      | depart,arrive                |
-            | a,l       | road,turn,turn | depart,turn left,arrive      |
-            | a,f       | road,road,road | depart,continue uturn,arrive |
-            | d,f       | road,road      | depart,arrive                |
-            | d,l       | road,turn,turn | depart,turn right,arrive     |
-            | d,c       | road,road,road | depart,continue uturn,arrive |
-            | g,l       | turn,turn,turn | depart,continue uturn,arrive |
-            | g,c       | turn,road,road | depart,turn left,arrive      |
+            | waypoints | route          | turns                        | locations |
+            | a,c       | road,road      | depart,arrive                | a,c       |
+            | a,l       | road,turn,turn | depart,turn left,arrive      | a,b,l     |
+            | a,f       | road,road,road | depart,continue uturn,arrive | a,b,f     |
+            | d,f       | road,road      | depart,arrive                | d,f       |
+            | d,l       | road,turn,turn | depart,turn right,arrive     | d,k,l     |
+            | d,c       | road,road,road | depart,continue uturn,arrive | d,e,c     |
+            | g,l       | turn,turn,turn | depart,continue uturn,arrive | g,e,l     |
+            | g,c       | turn,road,road | depart,turn left,arrive      | g,b,c     |
 
     #http://www.openstreetmap.org/#map=19/52.50878/13.26085
     Scenario: Curved Turn

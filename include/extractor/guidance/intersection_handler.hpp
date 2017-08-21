@@ -170,6 +170,15 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
             isLinkTo(compare_data.road_classification, candidate_data.road_classification))
             return true;
 
+        // staying on the same road class, encountering a road that is a severe change in class
+        // (residential-> motorway_link) is considered a fair distinction
+        if (compare_data.road_classification.IsLinkClass() &&
+            (via_edge_data.road_classification.GetPriority() ==
+             candidate_data.road_classification.GetPriority()) &&
+            (std::abs(static_cast<int>(getRoadGroup(via_edge_data.road_classification)) -
+                      static_cast<int>(getRoadGroup(compare_data.road_classification))) >= 2))
+            return true;
+
         return false;
     };
 
@@ -293,7 +302,10 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
             // we do not consider roads of far lesser category to be more obvious
             const auto &compare_data = node_based_graph.GetEdgeData(road.eid);
             if (strictlyLess(compare_data.road_classification, candidate_data.road_classification))
+            {
+                std::cout << "Road class is strictly less" << std::endl;
                 return false;
+            }
 
             // if the class is just not on the same level
             if (distinct_by_class(road))
@@ -312,11 +324,16 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
                   getRoadGroup(compare_data.road_classification)) &&
                  (via_edge_data.road_classification.GetPriority() ==
                   candidate_data.road_classification.GetPriority())))
+            {
+                std::cout << "Distinct by group." << std::endl;
                 return false;
+            }
 
             // if the turn is much stronger, we are also fine (note that we do not have to check
             // absolutes, since candidate is at least > NARROW_TURN_ANGLE
             const auto compare_deviation = util::angularDeviation(road.angle, STRAIGHT_ANGLE);
+            std::cout << "Deviations: " << compare_deviation << " " << candidate_deviation
+                      << " Distinct; " << compare_deviation / candidate_deviation << std::endl;
             if (compare_deviation / candidate_deviation > DISTINCTION_RATIO)
             {
                 std::cout << "Distinct by deviation" << std::endl;
