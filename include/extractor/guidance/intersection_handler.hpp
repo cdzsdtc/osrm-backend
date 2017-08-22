@@ -493,6 +493,7 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
     if ((straightmost_valid != straightmost_turn_itr) &&
         (straightmost_valid != intersection.end()) &&
         (util::angularDeviation(STRAIGHT_ANGLE,straightmost_valid->angle) <= GROUP_ANGLE) &&
+        !node_based_graph.GetEdgeData(straightmost_valid->eid).road_classification.IsLowPriorityRoadClass() &&
         isDistinctTurn(
             std::distance(intersection.begin(), straightmost_valid), via_edge, intersection))
         return std::distance(intersection.begin(), straightmost_valid);
