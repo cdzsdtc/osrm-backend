@@ -238,9 +238,9 @@ Feature: Motorway Guidance
             | eb    | motorway |
 
         When I route I should get
-            | waypoints | route      | turns                            |
-            | d,c       | db,abc,abc | depart,merge slight left,arrive  |
-            | e,c       | eb,abc,abc | depart,merge slight right,arrive |
+            | waypoints | route  | turns         |
+            | d,c       | db,abc | depart,arrive |
+            | e,c       | eb,abc | depart,arrive |
 
     Scenario: Handle 90 degree off ramps correctly
         Given the node map

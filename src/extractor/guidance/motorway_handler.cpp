@@ -102,7 +102,19 @@ Intersection MotorwayHandler::fromMotorway(const EdgeID via_eid, Intersection in
 
     if (continue_pos == 0)
     {
-        if (intersection.size() == 2)
+        if( intersection.countEnterable() == 1 )
+        {
+            auto allowed = std::find_if(intersection.begin(), intersection.end(), [](auto const& road){ return road.entry_allowed; });
+            auto const index = std::distance(intersection.begin(),allowed);
+
+            intersection[index].instruction =
+                    getInstructionForObvious(intersection.size(),
+                                             via_eid,
+                                             false,
+                                             intersection[index]);
+
+        }
+        else if (intersection.size() == 2)
         {
             // do not announce ramps at the end of a highway
             intersection[1].instruction = {TurnType::NoTurn,

@@ -248,7 +248,15 @@ inline bool IntersectionHandler::isDistinctTurn(const std::size_t index,
                                                        name_table,
                                                        street_name_suffix_table));
             auto const continuing_road_takes_a_turn = candidate_changes_name && continue_turns;
-
+            std::cout << "Deviation Check: " << !continuing_road_takes_a_turn << " && "
+                      << compare_deviation << " / " << candidate_deviation
+                      << " == " << (compare_deviation / std::max(0.1, candidate_deviation))
+                      << " -> " << (compare_deviation / std::max(0.1, candidate_deviation) >
+                                    DISTINCTION_RATIO)
+                      << " && " << std::abs(compare_deviation - candidate_deviation) << " -> "
+                      << (std::abs(compare_deviation - candidate_deviation) >
+                          FUZZY_ANGLE_DIFFERENCE)
+                      << std::endl;
             // at least a relative and a maximum difference, if the road name does not turn.
             // Since we can announce `stay on X for 2 miles, we need to ensure that we announce
             // turns off it (even if straight). Otherwise people might follow X further than they
@@ -474,6 +482,20 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
                   << " to be obvious." << std::endl;
         return std::distance(intersection.begin(), straightmost_turn_itr);
     }
+
+    auto const valid_turn = [&](auto const &road) {
+        return !road.entry_allowed;
+    };
+
+    // we cannot find a turn of same or higher priority, so we check if any straightmost turn could
+    // be obvious. We only consider somewhat narrow turns for these cases though
+    auto const straightmost_valid = intersection.findClosestTurn(STRAIGHT_ANGLE, valid_turn);
+    if ((straightmost_valid != straightmost_turn_itr) &&
+        (straightmost_valid != intersection.end()) &&
+        (util::angularDeviation(STRAIGHT_ANGLE,straightmost_valid->angle) <= GROUP_ANGLE) &&
+        isDistinctTurn(
+            std::distance(intersection.begin(), straightmost_valid), via_edge, intersection))
+        return std::distance(intersection.begin(), straightmost_valid);
 
     return 0;
 }

@@ -397,6 +397,7 @@ Feature: Simple Turns
             | d,c       | road,road,road | depart,continue uturn,arrive | d,e,c     |
             | g,l       | turn,turn,turn | depart,continue uturn,arrive | g,e,l     |
             | g,c       | turn,road,road | depart,turn left,arrive      | g,b,c     |
+            | m,l       | turn,turn      | depart,arrive                | m,l       |
 
     #http://www.openstreetmap.org/#map=19/52.50878/13.26085
     Scenario: Curved Turn
@@ -882,8 +883,8 @@ Feature: Simple Turns
         And the ways
             | nodes | name  | oneway | lanes | highway   |
             | abcdk | ernst | yes    | 4     | primary   |
-            | ek    | ernst | yes    | 5     | primary   |
-            | kef   | ernst | yes    | 4     | primary   |
+            | ke    | ernst | yes    | 5     | primary   |
+            | ef    | ernst | yes    | 4     | primary   |
             | ghd   | march | yes    | 3     | secondary |
             | eij   | otto  | yes    | 2     | secondary |
 
