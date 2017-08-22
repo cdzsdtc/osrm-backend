@@ -8,6 +8,7 @@
 #include "extractor/packed_osm_ids.hpp"
 
 #include "util/coordinate.hpp"
+#include "util/guidance/name_announcements.hpp"
 #include "util/name_table.hpp"
 #include "util/node_based_graph.hpp"
 
@@ -57,9 +58,10 @@ class ValidationHandler final : public IntersectionHandler
                             const EdgeID via_eid,
                             Intersection intersection) const override final
     {
-        checkForSharpTurnsOntoRamps(nid, via_eid, intersection);
-        checkForSharpTurnsBetweenRamps(nid, via_eid, intersection);
-        // checkForSharpTurnsOnFastRoads(nid, via_eid, intersection);
+        // checkForSharpTurnsOntoRamps(nid, via_eid, intersection);
+        // checkForSharpTurnsBetweenRamps(nid, via_eid, intersection);
+        //// checkForSharpTurnsOnFastRoads(nid, via_eid, intersection);
+        checkForSharpDualCarriagewayUturns(nid, via_eid, intersection);
 
         return intersection;
     }
@@ -175,6 +177,81 @@ class ValidationHandler final : public IntersectionHandler
                 const NodeID to_nid = node_based_graph.GetTarget(road.eid);
                 printTurnInfo(from_nid, via_nid, to_nid, road.angle);
             }
+        }
+    }
+
+    void checkForSharpDualCarriagewayUturns(const NodeID from_nid,
+                                            const EdgeID via_eid,
+                                            const Intersection &intersection) const
+    {
+        // Detect situations where dual-carriageway fans-in from two ways into one and
+        // the Uturn from a dual-carriageway onto the dual-carriageway should be possible.
+        //
+        // . .
+        //     > .
+        // . .
+        //
+
+        // Todo: are there dual-carriageway intersections of larger size?
+        if (intersection.size() != 3)
+        {
+            return;
+        }
+
+        const auto &via_road = intersection.getUTurnRoad();
+        const auto &leftmost_road = intersection.getLeftmostRoad();
+        const auto &rightmost_road = intersection.getRightmostRoad();
+
+        const auto &via_road_data = node_based_graph.GetEdgeData(via_eid);
+        const auto &leftmost_road_data = node_based_graph.GetEdgeData(leftmost_road.eid);
+        const auto &rightmost_road_data = node_based_graph.GetEdgeData(rightmost_road.eid);
+
+        if (via_road_data.name_id == EMPTY_NAMEID || leftmost_road_data.name_id == EMPTY_NAMEID ||
+            rightmost_road_data.name_id == EMPTY_NAMEID)
+        {
+            return;
+        }
+
+        const auto same_name_left =
+            !util::guidance::requiresNameAnnounced(via_road_data.name_id,
+                                                   leftmost_road_data.name_id,
+                                                   name_table,
+                                                   street_name_suffix_table);
+        const auto same_name_right =
+            !util::guidance::requiresNameAnnounced(via_road_data.name_id,
+                                                   rightmost_road_data.name_id,
+                                                   name_table,
+                                                   street_name_suffix_table);
+
+        if (!same_name_left || !same_name_right)
+        {
+            return;
+        }
+
+        if (!via_road.entry_allowed || !leftmost_road.entry_allowed ||
+            !rightmost_road.entry_allowed)
+        {
+            return;
+        }
+
+        const auto left_turn_angle = osrm::util::angularDeviation(0, leftmost_road.angle);
+        const auto right_turn_angle = osrm::util::angularDeviation(0, rightmost_road.angle);
+
+        const auto sharp_left_turn = left_turn_angle <= 2 * NARROW_TURN_ANGLE;
+        const auto sharp_right_turn = right_turn_angle <= 2 * NARROW_TURN_ANGLE;
+
+        if (sharp_left_turn)
+        {
+            const NodeID via_nid = node_based_graph.GetTarget(via_eid);
+            const NodeID to_nid = node_based_graph.GetTarget(leftmost_road.eid);
+            printTurnInfo(from_nid, via_nid, to_nid, leftmost_road.angle);
+        }
+
+        if (sharp_right_turn)
+        {
+            const NodeID via_nid = node_based_graph.GetTarget(via_eid);
+            const NodeID to_nid = node_based_graph.GetTarget(rightmost_road.eid);
+            printTurnInfo(from_nid, via_nid, to_nid, rightmost_road.angle);
         }
     }
 };
