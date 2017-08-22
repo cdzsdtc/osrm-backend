@@ -26,6 +26,8 @@
 #include <iterator>
 #include <vector>
 
+#include "util/debug.hpp"
+
 namespace osrm
 {
 namespace engine
@@ -170,6 +172,9 @@ class RouteAPI : public BaseAPI
                  *    - postProcess must be called before collapseTurnInstructions that expects
                  *      post-processed roundabouts without Exit instructions
                  */
+
+                std::cout << "[route]" << std::endl;
+                util::guidance::print(steps);
 
                 guidance::trimShortSegments(steps, leg_geometry);
                 leg.steps = guidance::postProcess(std::move(steps));

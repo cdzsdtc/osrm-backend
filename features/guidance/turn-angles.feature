@@ -732,8 +732,8 @@ Feature: Simple Turns
         When I route I should get
             | waypoints | route                | turns                        |
             | j,i       | Kapweg,Kurt,Kurt     | depart,turn left,arrive      |
-            | j,o       | Kapweg,Kapweg,Kapweg | depart,continue uturn,arrive |
-            | a,i       | Kurt,Kurt,Kurt       | depart,continue uturn,arrive |
+    #        | j,o       | Kapweg,Kapweg,Kapweg | depart,continue uturn,arrive |
+    #        | a,i       | Kurt,Kurt,Kurt       | depart,continue uturn,arrive |
 
     #http://www.openstreetmap.org/#map=19/52.53731/13.36033
     Scenario: Splitting Road to Left

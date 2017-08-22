@@ -223,10 +223,12 @@ void AdjustToCombinedTurnStrategy::operator()(RouteStep &step_at_turn_location,
             if (new_modifier == DirectionModifier::Straight)
                 setInstructionType(step_at_turn_location, TurnType::NewName);
             else
+            {
                 step_at_turn_location.maneuver.instruction.type =
                     haveSameName(step_prior_to_intersection, transfer_from_step)
                         ? TurnType::Continue
                         : TurnType::Turn;
+            }
         }
         else if (hasTurnType(step_at_turn_location, TurnType::NewName) &&
                  hasTurnType(transfer_from_step, TurnType::Suppressed) &&
@@ -408,6 +410,10 @@ RouteSteps collapseTurnInstructions(RouteSteps steps)
             strategy(*next_step, *current_step);
             // suppress previous step
             suppressStep(*previous_step, *current_step);
+            // we miss-use the strategy here by switching turn-order. So if previous has the same
+            // name as current, we detect continues, which is invalid
+            if (next_step->maneuver.instruction.type == TurnType::Continue)
+                next_step->maneuver.instruction.type = TurnType::Turn;
         }
         else if (maneuverSucceededByNameChange(current_step, next_step) ||
                  nameChangeImmediatelyAfterSuppressed(current_step, next_step) ||
