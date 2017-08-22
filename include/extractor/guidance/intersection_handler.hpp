@@ -32,6 +32,7 @@ namespace guidance
 class IntersectionHandler
 {
     using EdgeData = osrm::util::NodeBasedDynamicGraph::EdgeData;
+
   public:
     IntersectionHandler(const util::NodeBasedDynamicGraph &node_based_graph,
                         const std::vector<util::Coordinate> &coordinates,
@@ -539,6 +540,24 @@ std::size_t IntersectionHandler::findObviousTurn(const EdgeID via_edge,
              .road_classification.IsLowPriorityRoadClass() &&
         IsDistinctTurn(
             std::distance(intersection.begin(), straightmost_valid), via_edge, intersection))
+    {
+        if (CanBeObvious(node_based_graph.GetEdgeData(via_edge),
+                         node_based_graph.GetEdgeData(straightmost_valid->eid)))
+            return std::distance(intersection.begin(), straightmost_valid);
+        else
+            return 0;
+    }
+
+    // Special case handling for roads splitting up, all the same name (exactly the same)
+    if (intersection.size() == 3 &&
+        std::all_of(intersection.begin(), intersection.end(), [ id = via_edge_data.name_id,
+                                                                this ](auto const &road) {
+            return node_based_graph.GetEdgeData(road.eid).name_id == id;
+        }) &&
+        intersection.countEnterable() == 1 &&
+        // ensure that we do not lookt at a end of the road turn in a segregated intersection
+        (util::angularDeviation(intersection[1].angle, 90) > NARROW_TURN_ANGLE ||
+         util::angularDeviation(intersection[2].angle, 270) > NARROW_TURN_ANGLE))
     {
         if (CanBeObvious(node_based_graph.GetEdgeData(via_edge),
                          node_based_graph.GetEdgeData(straightmost_valid->eid)))
